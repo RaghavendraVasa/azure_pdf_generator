@@ -7,20 +7,19 @@ import fs from 'fs'
 import * as StreamPromises from "stream/promises";
 const doc = PDFDocument.create()
 
-async function pdf() {
+async function pdf(runId: number) {
     const projectId: string = common.getProject();
     const webApi: nodeApi.WebApi = await common.getWebApi();
     const testApiObject: TestApi.ITestApi = await webApi.getTestApi();
-    const runs: TestInterfaces.TestRun[] = await testApiObject.getTestRuns(projectId);
-    const testResultsByRunId: TestInterfaces.TestCaseResult[] = await testApiObject.getTestResults(projectId, runs[runs.length - 1].id)
+    const testResultsByRunId: TestInterfaces.TestCaseResult[] = await testApiObject.getTestResults(projectId, runId)
 
     if (!fs.existsSync('./screenshots')) {
         fs.mkdirSync('./screenshots', { recursive: true })
     }
 
     await Promise.all(testResultsByRunId.map(async (testResult) => {
-        const attachments: TestInterfaces.TestAttachment[] = await testApiObject.getTestResultAttachments(projectId, runs[runs.length - 1].id, testResult.id as number)
-        
+        const attachments: TestInterfaces.TestAttachment[] = await testApiObject.getTestResultAttachments(projectId, runId, testResult.id as number)
+
         let filtered_attachments = attachments.filter(function (attachment) {
             if (attachment.fileName?.endsWith('.png')) {
                 return attachment;
@@ -28,7 +27,7 @@ async function pdf() {
         })
 
         await Promise.all(filtered_attachments.map(async (attachment) => {
-            let readableStream: NodeJS.ReadableStream = await testApiObject.getTestResultAttachmentContent(projectId, runs[runs.length - 1].id, testResult.id as number, attachment.id)
+            let readableStream: NodeJS.ReadableStream = await testApiObject.getTestResultAttachmentContent(projectId, runId, testResult.id as number, attachment.id)
             let writableStream = fs.createWriteStream(`./screenshots/${attachment.fileName}`)
             await StreamPromises.pipeline(readableStream, writableStream);
         }))
@@ -46,7 +45,8 @@ async function pdf() {
             }
         }
     }))
-    fs.writeFileSync(`./${runs[runs.length - 1].id}.pdf`, await (await doc).save())
+    fs.writeFileSync(`./Run-${runId}.pdf`, await (await doc).save())
+    fs.rmSync('./screenshots/',{recursive: true})
 }
 
 async function createPage(testCase: string, status: string, beforeStep: string, beforeImg: string, afterStep?: string, afterImg?: string) {
@@ -105,4 +105,4 @@ function sliceIntoChunks(arr: TestInterfaces.TestAttachment[], chunkSize: number
     return res;
 }
 
-pdf()
+pdf(234)
