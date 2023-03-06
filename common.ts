@@ -1,5 +1,5 @@
 import * as vm from "azure-devops-node-api";
-import dotenv from 'dotenv'
+import * as dotenv from 'dotenv'
 dotenv.config()
 
 export async function getWebApi(this: any, serverUrl?: string): Promise<vm.WebApi> {

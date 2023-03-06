@@ -3,8 +3,11 @@ import * as nodeApi from 'azure-devops-node-api';
 import * as TestApi from 'azure-devops-node-api/TestApi';
 import * as TestInterfaces from 'azure-devops-node-api/interfaces/TestInterfaces';
 import { PDFDocument, PageSizes } from 'pdf-lib'
-import fs from 'fs'
+import * as fs from 'fs'
 import * as StreamPromises from "stream/promises";
+import {BlobServiceClient} from '@azure/storage-blob'
+import * as dotenv from 'dotenv'
+dotenv.config()
 const doc = PDFDocument.create()
 
 async function pdf(runId: number) {
@@ -17,7 +20,14 @@ async function pdf(runId: number) {
         fs.mkdirSync('./screenshots', { recursive: true })
     }
 
-    await Promise.all(testResultsByRunId.map(async (testResult) => {
+    const sortTestResultsByRunId = testResultsByRunId.sort((a, b) => {
+        if(typeof a.id !=='undefined' && typeof b.id !=='undefined'){
+            return a.id - b.id
+        }
+        return -1
+    })
+
+    await Promise.all(sortTestResultsByRunId.map(async (testResult) => {
         const attachments: TestInterfaces.TestAttachment[] = await testApiObject.getTestResultAttachments(projectId, runId, testResult.id as number)
 
         let filtered_attachments = attachments.filter(function (attachment) {
@@ -32,21 +42,23 @@ async function pdf(runId: number) {
             await StreamPromises.pipeline(readableStream, writableStream);
         }))
 
-        let dividedArray = sliceIntoChunks(filtered_attachments, 2)
+        let dividedArray = await sliceIntoChunks(filtered_attachments, 2)
 
-        for (let i = 0; i < dividedArray.length; i++) {
-            if (dividedArray[i].length == 2 && dividedArray[i][0].fileName?.startsWith('Before') && dividedArray[i][1].fileName?.startsWith('After')) {
-                createPage(testResult.testCaseTitle as string, testResult.outcome as string, dividedArray[i][0].fileName?.split('_').join(' ') as string,
-                    dividedArray[i][0].fileName as string, dividedArray[i][1].fileName?.split('_').join(' ') as string, dividedArray[i][1].fileName as string)
+        await Promise.all(dividedArray.map(async (item) => {
+            if (item.length == 2 && item[0].fileName?.startsWith('Before') && item[1].fileName?.startsWith('After')) {
+                await createPage(testResult.testCaseTitle as string, testResult.outcome as string, item[0].fileName?.split('_').join(' ') as string,
+                    item[0].fileName as string, item[1].fileName?.split('_').join(' ') as string, item[1].fileName as string)
             }
-            else if (dividedArray[i].length == 1 && dividedArray[i][0].fileName?.startsWith('Before')) {
-                createPage(testResult.testCaseTitle as string, testResult.outcome as string, dividedArray[i][0].fileName?.split('_').join(' ') as string,
-                    dividedArray[i][0].fileName as string)
+            else if (item.length == 1 && item[0].fileName?.startsWith('Before')) {
+                await createPage(testResult.testCaseTitle as string, testResult.outcome as string, item[0].fileName?.split('_').join(' ') as string,
+                    item[0].fileName as string)
             }
-        }
+        }))
     }))
     fs.writeFileSync(`./Run-${runId}.pdf`, await (await doc).save())
     fs.rmSync('./screenshots/',{recursive: true})
+    await uploadToBlob(`Run-${runId}.pdf`)
+    fs.rmSync(`./Run-${runId}.pdf`,{recursive: true})
 }
 
 async function createPage(testCase: string, status: string, beforeStep: string, beforeImg: string, afterStep?: string, afterImg?: string) {
@@ -96,13 +108,20 @@ async function createPage(testCase: string, status: string, beforeStep: string, 
     }
 }
 
-function sliceIntoChunks(arr: TestInterfaces.TestAttachment[], chunkSize: number) {
+async function sliceIntoChunks(arr: TestInterfaces.TestAttachment[], chunkSize: number) {
     const res = [];
     for (let i = 0; i < arr.length; i += chunkSize) {
         const chunk = arr.slice(i, i + chunkSize);
         res.push(chunk);
     }
     return res;
+}
+
+async function uploadToBlob(fileName: string){
+    const blobServiceClient = BlobServiceClient.fromConnectionString(String(process.env.AZURE_STORAGE_CONNECTION_STRING))
+    const containerClient = blobServiceClient.getContainerClient('pdf-container')
+    const blockBlobClient = containerClient.getBlockBlobClient(fileName)
+    await blockBlobClient.uploadFile(`./${fileName}`)
 }
 
 pdf(234)
