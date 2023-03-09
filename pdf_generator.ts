@@ -3,31 +3,19 @@ import * as nodeApi from 'azure-devops-node-api';
 import * as TestApi from 'azure-devops-node-api/TestApi';
 import * as TestInterfaces from 'azure-devops-node-api/interfaces/TestInterfaces';
 import { PDFDocument, PageSizes } from 'pdf-lib'
-import * as fs from 'fs'
-import * as StreamPromises from "stream/promises";
-import {BlobServiceClient} from '@azure/storage-blob'
+import { BlobServiceClient } from '@azure/storage-blob'
 import * as dotenv from 'dotenv'
 dotenv.config()
-const doc = PDFDocument.create()
+
 
 async function pdf(runId: number) {
+    const doc = await PDFDocument.create()
     const projectId: string = common.getProject();
     const webApi: nodeApi.WebApi = await common.getWebApi();
     const testApiObject: TestApi.ITestApi = await webApi.getTestApi();
     const testResultsByRunId: TestInterfaces.TestCaseResult[] = await testApiObject.getTestResults(projectId, runId)
 
-    if (!fs.existsSync('./screenshots')) {
-        fs.mkdirSync('./screenshots', { recursive: true })
-    }
-
-    const sortTestResultsByRunId = testResultsByRunId.sort((a, b) => {
-        if(typeof a.id !=='undefined' && typeof b.id !=='undefined'){
-            return a.id - b.id
-        }
-        return -1
-    })
-
-    await Promise.all(sortTestResultsByRunId.map(async (testResult) => {
+    for await (let testResult of testResultsByRunId){
         const attachments: TestInterfaces.TestAttachment[] = await testApiObject.getTestResultAttachments(projectId, runId, testResult.id as number)
 
         let filtered_attachments = attachments.filter(function (attachment) {
@@ -36,33 +24,28 @@ async function pdf(runId: number) {
             }
         })
 
-        await Promise.all(filtered_attachments.map(async (attachment) => {
-            let readableStream: NodeJS.ReadableStream = await testApiObject.getTestResultAttachmentContent(projectId, runId, testResult.id as number, attachment.id)
-            let writableStream = fs.createWriteStream(`./screenshots/${attachment.fileName}`)
-            await StreamPromises.pipeline(readableStream, writableStream);
-        }))
-
         let dividedArray = await sliceIntoChunks(filtered_attachments, 2)
 
-        await Promise.all(dividedArray.map(async (item) => {
+        for await(let item of dividedArray){
             if (item.length == 2 && item[0].fileName?.startsWith('Before') && item[1].fileName?.startsWith('After')) {
-                await createPage(testResult.testCaseTitle as string, testResult.outcome as string, item[0].fileName?.split('_').join(' ') as string,
-                    item[0].fileName as string, item[1].fileName?.split('_').join(' ') as string, item[1].fileName as string)
+                let beforeReadableStream: NodeJS.ReadableStream = await testApiObject.getTestResultAttachmentContent(projectId, runId, testResult.id as number, item[0].id)
+                let afterReadableStream: NodeJS.ReadableStream = await testApiObject.getTestResultAttachmentContent(projectId, runId, testResult.id as number, item[1].id)
+                await createPage(doc,testResult.testCaseTitle as string, testResult.outcome as string, item[0].fileName?.split('_').join(' ') as string,
+                    await streamToString(beforeReadableStream), item[1].fileName?.split('_').join(' ') as string, await streamToString(afterReadableStream))
             }
             else if (item.length == 1 && item[0].fileName?.startsWith('Before')) {
-                await createPage(testResult.testCaseTitle as string, testResult.outcome as string, item[0].fileName?.split('_').join(' ') as string,
-                    item[0].fileName as string)
+                let beforeReadableStream: NodeJS.ReadableStream = await testApiObject.getTestResultAttachmentContent(projectId, runId, testResult.id as number, item[0].id)
+                await createPage(doc,testResult.testCaseTitle as string, testResult.outcome as string, item[0].fileName?.split('_').join(' ') as string,
+                    await streamToString(beforeReadableStream))
             }
-        }))
-    }))
-    fs.writeFileSync(`./Run-${runId}.pdf`, await (await doc).save())
-    fs.rmSync('./screenshots/',{recursive: true})
-    await uploadToBlob(`Run-${runId}.pdf`)
-    fs.rmSync(`./Run-${runId}.pdf`,{recursive: true})
+        }
+    }
+    const pdfBytes= await doc.save()
+    await uploadToBlob(`./Run-${runId}.pdf`,pdfBytes)
 }
 
-async function createPage(testCase: string, status: string, beforeStep: string, beforeImg: string, afterStep?: string, afterImg?: string) {
-    const page = (await doc).addPage([PageSizes.A4[1], PageSizes.A4[0]])
+async function createPage(doc: PDFDocument,testCase: string, status: string, beforeStep: string, beforeImg: string, afterStep?: string, afterImg?: string) {
+    const page = doc.addPage([PageSizes.A4[1], PageSizes.A4[0]])
     page.drawText(`Test case name: ${testCase}`, {
         x: 20,
         y: page.getHeight() - 20,
@@ -81,7 +64,7 @@ async function createPage(testCase: string, status: string, beforeStep: string, 
         size: 12
     })
 
-    let bimage = await (await doc).embedPng(fs.readFileSync(`./screenshots/${beforeImg}`))
+    let bimage = await doc.embedPng(beforeImg)
     page.drawImage(bimage, {
         x: 20,
         y: page.getHeight() / 2,
@@ -98,7 +81,7 @@ async function createPage(testCase: string, status: string, beforeStep: string, 
     }
 
     if (typeof afterImg !== 'undefined') {
-        let aimage = await (await doc).embedPng(fs.readFileSync(`./screenshots/${afterImg}`))
+        let aimage = await doc.embedPng(afterImg)
         page.drawImage(aimage, {
             x: page.getWidth() / 2 + 10,
             y: page.getHeight() / 2,
@@ -117,11 +100,21 @@ async function sliceIntoChunks(arr: TestInterfaces.TestAttachment[], chunkSize: 
     return res;
 }
 
-async function uploadToBlob(fileName: string){
+async function uploadToBlob(fileName: string, pdfBytes: Uint8Array) {
     const blobServiceClient = BlobServiceClient.fromConnectionString(String(process.env.AZURE_STORAGE_CONNECTION_STRING))
     const containerClient = blobServiceClient.getContainerClient('pdf-container')
     const blockBlobClient = containerClient.getBlockBlobClient(fileName)
-    await blockBlobClient.uploadFile(`./${fileName}`)
+    await blockBlobClient.upload(pdfBytes,pdfBytes.byteLength)
+}
+
+async function streamToString(stream: NodeJS.ReadableStream) {
+    const chunks = [];
+
+    for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+    }
+
+    return Buffer.concat(chunks).toString('base64');
 }
 
 pdf(234)
