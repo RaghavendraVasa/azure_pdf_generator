@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "pdf": "npx ts-node pdf_generator.ts"
+    "pdf": "npx ts-node pdf-generator.ts"
   },
   "keywords": [],
   "author": "",
