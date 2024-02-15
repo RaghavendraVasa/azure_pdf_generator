@@ -6,7 +6,7 @@ import { PDFDocument, PageSizes } from "pdf-lib";
 import { BlobServiceClient } from "@azure/storage-blob";
 import * as dotenv from "dotenv";
 import ReactPDF from "@react-pdf/renderer";
-import { MyDocument } from "./Pdf_Screen";
+import { MyDocument } from "./pdf-screen";
 import fs from "fs";
 dotenv.config();
 
