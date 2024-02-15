@@ -95,7 +95,7 @@ async function pdf(runId: number) {
     }
   }
   const bytes = await merger.saveAsBuffer();
-  await uploadToBlob(`./Run-${runId}.pdf`, bytes);
+  // await uploadToBlob(`./Run-${runId}.pdf`, bytes);
 }
 
 async function sliceIntoChunks(
@@ -129,4 +129,4 @@ export async function streamToString(stream: NodeJS.ReadableStream) {
   return Buffer.concat(chunks).toString("base64");
 }
 
-pdf(234);
+pdf(28693);

@@ -3,7 +3,7 @@ import * as dotenv from 'dotenv'
 dotenv.config()
 
 export async function getWebApi(this: any, serverUrl?: string): Promise<vm.WebApi> {
-    serverUrl = serverUrl || 'https://dev.azure.com/playwrightpoc';
+    serverUrl = serverUrl || 'https://dev.azure.com/CelitoTech';
     return await this.getApi(serverUrl);
 }
 
@@ -24,5 +24,5 @@ export async function getApi(serverUrl: string): Promise<vm.WebApi> {
 }
 
 export function getProject(): string {
-    return 'PlaywrightPOC';
+    return 'Quality System';
 }
